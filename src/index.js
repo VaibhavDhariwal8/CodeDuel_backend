@@ -19,7 +19,7 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const jwt = require("jsonwebtoken");
+const verifySupabaseToken = require("./utils/verifySupabaseToken");
 
 const problemsRouter = require("./routes/problems");
 const { executeCode } = require("./services/pistonClient");
@@ -80,9 +80,7 @@ io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error("missing token"));
   try {
-    const payload = jwt.verify(token, process.env.SUPABASE_JWT_SECRET, {
-      algorithms: ["HS256"],
-    });
+    const payload = await verifySupabaseToken(token);
 
     const userId = payload.sub;
     const {

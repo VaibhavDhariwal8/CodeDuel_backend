@@ -1,4 +1,4 @@
-const jwt = require("jsonwebtoken");
+const verifySupabaseToken = require("../utils/verifySupabaseToken");
 const pool = require("../db");
 
 async function requireAuth(req, res, next) {
@@ -11,13 +11,7 @@ async function requireAuth(req, res, next) {
       });
     }
 
-    const payload = jwt.verify(
-      header.slice(7),
-      process.env.SUPABASE_JWT_SECRET,
-      {
-        algorithms: ["HS256"],
-      },
-    );
+    const payload = await verifySupabaseToken(header.slice(7));
 
     const {
       rows: [user],
@@ -47,13 +41,11 @@ async function requireAuth(req, res, next) {
 
     next();
   } catch (err) {
-    if (err.name === "TokenExpiredError" || err.name === "JsonWebTokenError") {
-      return res.status(401).json({
-        error: "invalid token",
-      });
-    }
+    console.error("JWT VERIFY ERROR:", err);
 
-    next(err);
+    return res.status(401).json({
+      error: "invalid token",
+    });
   }
 }
 
