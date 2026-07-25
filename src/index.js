@@ -80,8 +80,9 @@ io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error("missing token"));
   try {
-    const payload = jwt.decode(token);
-    if (!payload?.sub) return next(new Error("invalid token"));
+    const payload = jwt.verify(token, process.env.SUPABASE_JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
 
     const userId = payload.sub;
     const {
