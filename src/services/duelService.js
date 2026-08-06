@@ -50,63 +50,68 @@ async function detectPlagiarism(submissionId, userId, problemId, codeHash) {
 }
 
 async function handleSubmit(io, socket, { matchId, code, language }, callback) {
-  const {
-    rows: [match],
-  } = await pool.query(
-    `select id, problem_id, player_one_id, player_two_id, status from matches where id = $1`,
-    [matchId],
-  );
-  if (!match || match.status !== "active")
-    return callback({ error: "match not active" });
-
-  const { rows: tests } = await pool.query(
-    `select id, input, expected_output, ordinal from test_cases where problem_id = $1 order by ordinal`,
-    [match.problem_id],
-  );
-
-  const codeHash = hashCode(code);
-  const {
-    rows: [submission],
-  } = await pool.query(
-    `insert into submissions (match_id, user_id, language, code, code_hash, tests_total) values ($1,$2,$3,$4,$5,$6) returning id`,
-    [matchId, socket.userId, language, code, codeHash, tests.length],
-  );
-
-  let passedCount = 0;
-  for (const t of tests) {
-    const output = await executeCode({ language, code, stdin: t.input });
-    const actual = (output.run?.stdout || "").trim();
-    const passed = actual === t.expected_output.trim();
-    if (passed) passedCount++;
-    await pool.query(
-      `insert into submission_test_results (submission_id, test_case_id, passed, runtime_ms, ordinal) values ($1,$2,$3,$4,$5)`,
-      [submission.id, t.id, passed, output.run?.time, t.ordinal],
+  try {
+    const {
+      rows: [match],
+    } = await pool.query(
+      `select id, problem_id, player_one_id, player_two_id, status from matches where id = $1`,
+      [matchId],
     );
-  }
-  await pool.query(`update submissions set tests_passed = $1 where id = $2`, [
-    passedCount,
-    submission.id,
-  ]);
+    if (!match || match.status !== "active")
+      return callback({ error: "match not active" });
 
-  await detectPlagiarism(
-    submission.id,
-    socket.userId,
-    match.problem_id,
-    codeHash,
-  );
+    const { rows: tests } = await pool.query(
+      `select id, input, expected_output, ordinal from test_cases where problem_id = $1 order by ordinal`,
+      [match.problem_id],
+    );
 
-  io.to(`match:${matchId}`).emit("duel:opponent:progress", {
-    submitterId: socket.userId,
-    testsPassed: passedCount,
-    testsTotal: tests.length,
-  });
-  callback({ testsPassed: passedCount, testsTotal: tests.length });
+    const codeHash = hashCode(code);
+    const {
+      rows: [submission],
+    } = await pool.query(
+      `insert into submissions (match_id, user_id, language, code, code_hash, tests_total) values ($1,$2,$3,$4,$5,$6) returning id`,
+      [matchId, socket.userId, language, code, codeHash, tests.length],
+    );
 
-  if (passedCount === tests.length) {
-    await finishMatch(io, matchId, {
-      resultType: "solved",
-      winnerId: socket.userId,
+    let passedCount = 0;
+    for (const t of tests) {
+      const output = await executeCode({ language, code, stdin: t.input });
+      const actual = (output.run?.stdout || "").trim();
+      const passed = actual === t.expected_output.trim();
+      if (passed) passedCount++;
+      await pool.query(
+        `insert into submission_test_results (submission_id, test_case_id, passed, runtime_ms, ordinal) values ($1,$2,$3,$4,$5)`,
+        [submission.id, t.id, passed, output.run?.time, t.ordinal],
+      );
+    }
+    await pool.query(`update submissions set tests_passed = $1 where id = $2`, [
+      passedCount,
+      submission.id,
+    ]);
+
+    await detectPlagiarism(
+      submission.id,
+      socket.userId,
+      match.problem_id,
+      codeHash,
+    );
+
+    io.to(`match:${matchId}`).emit("duel:opponent:progress", {
+      submitterId: socket.userId,
+      testsPassed: passedCount,
+      testsTotal: tests.length,
     });
+    callback({ testsPassed: passedCount, testsTotal: tests.length });
+
+    if (passedCount === tests.length) {
+      await finishMatch(io, matchId, {
+        resultType: "solved",
+        winnerId: socket.userId,
+      });
+    }
+  } catch (err) {
+    console.error("duel:submit failed", err.response?.data || err);
+    callback({ error: "code execution failed" });
   }
 }
 
